@@ -62,7 +62,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 2
     agent = Agent(ws, plane, backend)
 
-    print(f"{BOLD}tether{RESET} {DIM}· {backend.describe()}{RESET}")
+    print(f"{BOLD}retie{RESET} {DIM}· {backend.describe()}{RESET}")
     print(f"{DIM}  {ws.root} · ledger {args.ledger}{RESET}")
     if router is not None:
         pool = router.candidates()
@@ -155,7 +155,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
     key = os.environ.get("OLLAMA_API_KEY") or _key_from_config()
     if not key:
-        print(f"{RED}no API key{RESET} — see `tether run --help`")
+        print(f"{RED}no API key{RESET} — see `retie run --help`")
         return 2
     usage = Usage.load(Path(args.usage).expanduser())
     models = sorted(discover(), key=lambda m: (m.tier, m.size_bytes))
@@ -242,9 +242,9 @@ def _wrap(text: str, width: int) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        prog="tether",
+        prog="retie",
         description="A coding agent that plans the undo before it acts.")
-    p.add_argument("--ledger", default="tether-ledger.db",
+    p.add_argument("--ledger", default="retie-ledger.db",
                    help="path to the tamper-evident action ledger")
     sub = p.add_subparsers(dest="cmd")
 
@@ -255,11 +255,11 @@ def main(argv: list[str] | None = None) -> int:
                      help="ollama runs hosted open models (no download, needs "
                           "OLLAMA_API_KEY); anthropic needs ANTHROPIC_API_KEY")
     run.add_argument("--model", default=None,
-                     help="model id; see `tether models` for what Ollama Cloud runs")
+                     help="model id; see `retie models` for what Ollama Cloud runs")
     run.add_argument("--max-tier", type=int, default=4, choices=[1, 2, 3, 4],
                      help="heaviest model tier to use. Lower stretches the quota: "
                           "a tier-1 model costs about a quarter of a tier-4 one")
-    run.add_argument("--usage", default="~/.tether/usage.json",
+    run.add_argument("--usage", default="~/.retie/usage.json",
                      help="where to keep the local usage counter")
     run.add_argument("--effort", default="high",
                      choices=["low", "medium", "high", "xhigh", "max"],
@@ -278,11 +278,11 @@ def main(argv: list[str] | None = None) -> int:
     mod.set_defaults(func=cmd_models)
 
     prb = sub.add_parser("probe", help="find which models this account may call")
-    prb.add_argument("--usage", default="~/.tether/usage.json")
+    prb.add_argument("--usage", default="~/.retie/usage.json")
     prb.set_defaults(func=cmd_probe)
 
     usg = sub.add_parser("usage", help="what this tool has spent, and the model ladder")
-    usg.add_argument("--usage", default="~/.tether/usage.json")
+    usg.add_argument("--usage", default="~/.retie/usage.json")
     usg.add_argument("--max-tier", type=int, default=4, choices=[1, 2, 3, 4])
     usg.set_defaults(func=cmd_usage)
 

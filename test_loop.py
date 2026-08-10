@@ -17,10 +17,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tether.agent import Agent
-from tether.providers import ToolCall, Turn
-from tether.safety import SafetyPlane
-from tether.tools import Workspace
+from retie.agent import Agent
+from retie.providers import ToolCall, Turn
+from retie.safety import SafetyPlane
+from retie.tools import Workspace
 
 BOLD, DIM, GREEN, RED, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[0m"
 
@@ -66,7 +66,7 @@ class FakeBackend:
 
 
 def run_case(name: str, turns: list[Turn], shape: str, *, auto_approve=True):
-    root = Path(tempfile.mkdtemp(prefix="tether-loop-"))
+    root = Path(tempfile.mkdtemp(prefix="retie-loop-"))
     (root / "calc.py").write_text("def add(a, b):\n    return a - b\n")
     ws = Workspace.create(root)
     gated: list[str] = []

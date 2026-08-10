@@ -20,12 +20,12 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tether.providers import (OpenAICompatBackend, ProviderRefused,
+from retie.providers import (OpenAICompatBackend, ProviderRefused,
                               QuotaExhausted)
-from tether.routing import (LimitKind, ModelInfo, Router, Usage, classify_limit,
+from retie.routing import (LimitKind, ModelInfo, Router, Usage, classify_limit,
                             tier_for)
-from tether.toolspec import build_specs
-from tether.tools import Workspace
+from retie.toolspec import build_specs
+from retie.tools import Workspace
 
 BOLD, DIM, GREEN, RED, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[0m"
 FAILS = 0
@@ -123,7 +123,7 @@ def run(be, ws):
 
 
 def main() -> int:
-    tmp = tempfile.mkdtemp(prefix="tether-route-")
+    tmp = tempfile.mkdtemp(prefix="retie-route-")
     ws = Workspace.create(tempfile.mkdtemp())
 
     print(f"\n{BOLD}tiering is derived from size, anchored on the documented models{RESET}\n")

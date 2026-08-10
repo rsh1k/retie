@@ -14,15 +14,15 @@ import sys
 import tempfile
 from pathlib import Path
 
-from tether.safety import SafetyPlane
-from tether.tools import Workspace, edit_file, read_file, run_bash, write_file
+from retie.safety import SafetyPlane
+from retie.tools import Workspace, edit_file, read_file, run_bash, write_file
 
 BOLD, DIM, GREEN, RED, YELLOW, RESET = (
     "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[33m", "\033[0m")
 
 
 def main() -> int:
-    root = Path(tempfile.mkdtemp(prefix="tether-demo-"))
+    root = Path(tempfile.mkdtemp(prefix="retie-demo-"))
     (root / "calc.py").write_text("def add(a, b):\n    return a - b\n")
     ledger = root / "ledger.db"
 

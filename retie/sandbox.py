@@ -181,7 +181,7 @@ class Sandbox:
     # -- reversibility ----------------------------------------------------
     def snapshot(self) -> str:
         """Copy the workspace aside. This is what makes a confined command undoable."""
-        dest = Path(tempfile.mkdtemp(prefix="tether-ws-"))
+        dest = Path(tempfile.mkdtemp(prefix="retie-ws-"))
         shutil.copytree(
             self.root, dest / "ws",
             symlinks=True,

@@ -18,9 +18,9 @@ account that will own the project.
 
    | Field | Value |
    |---|---|
-   | PyPI Project Name | `tether` |
+   | PyPI Project Name | `retie` |
    | Owner | `rsh1k` |
-   | Repository name | `tether` |
+   | Repository name | `retie` |
    | Workflow name | `release.yml` |
    | Environment name | `pypi` |
 
@@ -31,8 +31,13 @@ The **environment name matters** and is easy to miss: the `release` job declares
 was issued for does not match what the publisher expects. A mismatch fails at
 the publish step with a confusing permissions error rather than an obvious one.
 
-`tether` is registered as a *pending* publisher until the first successful
-upload claims the name. Nobody else can take it in the meantime.
+`retie` is registered as a *pending* publisher until the first successful upload
+creates the project.
+
+**A pending publisher does not reserve the name.** PyPI says so on that page:
+until the project actually exists, anyone else may create it, including via
+their own pending publisher. So the sooner the first release runs, the sooner
+the name is genuinely ours — configuring the publisher is not a claim on it.
 
 ### Optional but worth doing
 

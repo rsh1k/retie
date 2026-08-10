@@ -1,5 +1,5 @@
 [project]
-name = "tether"
+name = "retie"
 version = "0.1.0"
 description = "A coding agent that classifies every action by how hard it is to undo, and records it before it runs."
 requires-python = ">=3.10"
@@ -13,11 +13,11 @@ anthropic = ["anthropic>=0.116"]
 dev = ["ruff>=0.5"]
 
 [project.scripts]
-tether = "tether.cli:main"
+retie = "retie.cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.urls]
-Homepage = "https://github.com/rsh1k/tether"
+Homepage = "https://github.com/rsh1k/retie"

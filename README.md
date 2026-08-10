@@ -1,16 +1,16 @@
-# tether
+# retie
 
 A coding agent for the terminal that classifies every action by **how hard it is to undo**, plans the undo before acting, and records what it did to a tamper-evident ledger.
 
 It works the way Claude Code works: you talk to it in a terminal, it reads and edits files in your project, runs your tests. The difference is what sits between the model and your filesystem.
 
 ```bash
-pipx install tether
+pipx install retie
 export OLLAMA_API_KEY=...           # https://ollama.com/settings/keys
-tether run ./my-project
+retie run ./my-project
 ```
 
-It runs on **hosted open models by default** — nothing downloaded, no GPU needed. `tether models` lists what Ollama Cloud is serving; `--provider anthropic` switches to Claude.
+It runs on **hosted open models by default** — nothing downloaded, no GPU needed. `retie models` lists what Ollama Cloud is serving; `--provider anthropic` switches to Claude.
 
 ## Why
 
@@ -21,7 +21,7 @@ Prompt injection is not solved. Independent testing puts a widely-used agent run
 
 Most agent runtimes gate on **tool name**. That has a documented hole its own authors are explicit about: allowing `exec` while denying `write` does not make the shell read-only, because the policy layer cannot see inside a shell command.
 
-tether gates on **consequence** instead. The question is never "is this tool allowed?" — it is "can this be undone, and if not, who decided?"
+retie gates on **consequence** instead. The question is never "is this tool allowed?" — it is "can this be undone, and if not, who decided?"
 
 ## What that looks like
 
@@ -47,12 +47,12 @@ The default provider is [Ollama Cloud](https://ollama.com): frontier-scale open 
 
 Reached over Ollama's OpenAI-compatible endpoint at `https://ollama.com/v1`. Worth noting because Ollama's own compatibility docs cover only the local server, and secondary sources claim the cloud is *not* OpenAI-compatible — it is; verified against the live endpoint, not inferred.
 
-### Most of the catalogue is not free — run `tether probe` first
+### Most of the catalogue is not free — run `retie probe` first
 
 Ollama publishes 18 cloud models. On a free plan, **7 were accessible**; the other 11 answer `403 this model requires a subscription`. That includes every model you would pick from a benchmark table — `kimi-k2.7-code`, `glm-5.2`, `qwen3.5:397b`, `deepseek-v4-pro`.
 
 ```bash
-tether probe        # one token each; entitlement is checked before generation, so refusals are free
+retie probe        # one token each; entitlement is checked before generation, so refusals are free
 ```
 
 Results are cached, so the ladder is built from models you can actually call rather than from the published list. A `403` during a session drops that model permanently — it is not a quota problem and never resolves by waiting. A **timeout is recorded as inconclusive, not as a denial**: a cold model that took too long to wake would otherwise be dropped forever on the strength of one slow request.
@@ -63,7 +63,7 @@ The obvious design is "when one model is rate-limited, switch to another." **It 
 
 [Ollama's pricing page](https://ollama.com/pricing) says limits are **per plan**, not per model — session limits reset every 5 hours, weekly limits every 7 days. When the account's allowance is gone, every model is gone with it. A tool that cycles the whole list turns one clear message into eighteen failed requests.
 
-What *does* buy working hours is the other half of the same page: **usage is weighted by how heavy the model is**, from level 1 for light models like `gpt-oss:20b` up to level 4 for `deepseek-v4-pro`. A tier-1 model costs roughly a quarter of a tier-4 one for the same call. So tether:
+What *does* buy working hours is the other half of the same page: **usage is weighted by how heavy the model is**, from level 1 for light models like `gpt-oss:20b` up to level 4 for `deepseek-v4-pro`. A tier-1 model costs roughly a quarter of a tier-4 one for the same call. So retie:
 
 - **starts on the cheapest model and escalates only on failure** — never on a guess that a task looks hard
 - **derives tiers from live model size** rather than a hard-coded table, anchored on the two models Ollama documents as level 1 and level 4, so a newly published model is tiered the day it appears
@@ -72,11 +72,11 @@ What *does* buy working hours is the other half of the same page: **usage is wei
 - **caps spend on request**: `--max-tier 2` never touches the heavy models
 
 ```bash
-tether usage                 # what you have spent, and the ladder
-tether run ./proj --max-tier 2
+retie usage                 # what you have spent, and the ladder
+retie run ./proj --max-tier 2
 ```
 
-`tether usage` reports **consumption, not remaining balance**. Ollama publishes neither the free tier's allowance nor a usage endpoint, so a percentage would mean inventing the denominator.
+`retie usage` reports **consumption, not remaining balance**. Ollama publishes neither the free tier's allowance nor a usage endpoint, so a percentage would mean inventing the denominator.
 
 The default model is **`kimi-k2.7-code`** when you name one; otherwise the ladder starts at tier 1. Kimi is chosen for tool-calling *stability* rather than coding score — the strongest published agentic-loop evidence, 4,000+ tool calls sustained in one session. `glm-5.2` scores marginally higher on coding (87 vs 86) with 1M context. Those figures are vendor-run; treat them as directional.
 
@@ -110,7 +110,7 @@ A sandboxed shell command *is* undone — its workspace snapshot is the inverse.
 The ledger is hash-chained and verified from a **separate process**:
 
 ```bash
-tether verify --ledger tether-ledger.db
+retie verify --ledger retie-ledger.db
 ```
 
 A log you can only check from inside the process that wrote it is a log, not evidence.
@@ -134,7 +134,7 @@ Worth stating plainly: revoco's `PRA02` detector caught the first version of thi
 
 ## Status
 
-Published to PyPI as [`tether`](https://pypi.org/project/tether/) — the name was free, checked including PyPI's case and separator folding. (`tether-agent` exists but is an MQTT/IPC library, unrelated domain.)
+Published to PyPI as [`retie`](https://pypi.org/project/retie/) — the name was free, checked including PyPI's case and separator folding. (`retie-agent` exists but is an MQTT/IPC library, unrelated domain.)
 
 Releases are automatic: push to `main`, a patch version publishes via Trusted Publishing with no API token anywhere. See [docs/RELEASING.md](docs/RELEASING.md) — there is one manual PyPI form to fill in before the first release works.
 

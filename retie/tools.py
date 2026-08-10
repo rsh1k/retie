@@ -49,7 +49,7 @@ class Workspace:
     @classmethod
     def create(cls, root: str | Path) -> Workspace:
         root = Path(root).resolve()
-        snaps = Path(tempfile.mkdtemp(prefix="tether-snap-"))
+        snaps = Path(tempfile.mkdtemp(prefix="retie-snap-"))
         return cls(root=root, snapshots=snaps)
 
     def resolve(self, path: str) -> Path:

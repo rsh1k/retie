@@ -21,7 +21,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "tether/**"
+      - "retie/**"
       - "test_*.py"
       - "demo.py"
       - "pyproject.toml"
@@ -101,7 +101,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap
 
       - run: uv sync --extra dev
-      - run: uv run ruff check tether
+      - run: uv run ruff check retie
 
       # These need no API key: they exercise the safety plane, the sandbox, undo,
       # the ledger, and the agent loop against fake backends. The model-facing

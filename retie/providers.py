@@ -76,7 +76,7 @@ class QuotaExhausted(RuntimeError):
 
 
 def _key_from_config() -> str | None:
-    """Read the key from ~/.tether/config.json.
+    """Read the key from ~/.retie/config.json.
 
     An environment variable only exists in the shell that exported it, which
     makes it a poor place for a credential you want every terminal — and every
@@ -88,7 +88,7 @@ def _key_from_config() -> str | None:
     import stat
     from pathlib import Path
 
-    path = Path(os.environ.get("TETHER_CONFIG", "~/.tether/config.json")).expanduser()
+    path = Path(os.environ.get("RETIE_CONFIG", "~/.retie/config.json")).expanduser()
     if not path.is_file():
         return None
     try:
@@ -201,7 +201,7 @@ class OpenAICompatBackend:
         if not key:
             raise RuntimeError(
                 "no Ollama API key. Get one at https://ollama.com/settings/keys, "
-                "then either put it in ~/.tether/config.json as "
+                "then either put it in ~/.retie/config.json as "
                 '{"ollama_api_key": "..."} or export OLLAMA_API_KEY.')
         self.router = router
         self.on_switch = on_switch

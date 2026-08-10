@@ -45,7 +45,7 @@ def default_policy() -> Policy:
     quietly allowed.
     """
     return Policy(
-        name="tether-default",
+        name="retie-default",
         version="1",
         default_effect=Effect.DENY,
         rules=(
@@ -232,7 +232,7 @@ class SafetyPlane:
         human_key = ed25519.Ed25519PrivateKey.generate()
         agent_key = ed25519.Ed25519PrivateKey.generate()
         human = self.plane.register_human("local-user", human_key.public_key())
-        agent = self.plane.register_agent("tether-agent", agent_key.public_key())
+        agent = self.plane.register_agent("retie-agent", agent_key.public_key())
 
         grant = self.plane.issue_root_delegation(
             human_private_key=human_key,
