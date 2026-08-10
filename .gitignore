@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+# never commit a ledger, a usage counter, or a key
+*.db
+*.db-shm
+*.db-wal
+usage.json
+config.json
