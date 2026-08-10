@@ -16,11 +16,19 @@ like and an inferred one hides that disagreement until a call fails at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
-from .tools import (Workspace, edit_file, glob_files, grep_files, read_file,
-                    run_bash, write_file)
+from .tools import (
+    Workspace,
+    edit_file,
+    glob_files,
+    grep_files,
+    read_file,
+    run_bash,
+    write_file,
+)
 
 
 @dataclass(frozen=True)

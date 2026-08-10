@@ -17,10 +17,11 @@ OpenAI-shaped errors. Verified against the live endpoint, not inferred.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable
+from typing import Any
 
-from .routing import LimitKind, ModelInfo, Router, classify_limit
+from .routing import LimitKind, Router, classify_limit
 from .toolspec import ToolSpec
 
 ANTHROPIC_MODEL = "claude-opus-5"

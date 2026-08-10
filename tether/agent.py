@@ -13,12 +13,13 @@ providers do not run tools at all.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .providers import ToolCall, Turn
 from .safety import SafetyPlane
-from .toolspec import ToolSpec, build_specs
 from .tools import Workspace
+from .toolspec import ToolSpec, build_specs
 
 MAX_STEPS = 40
 

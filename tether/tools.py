@@ -47,7 +47,7 @@ class Workspace:
     _saved: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def create(cls, root: str | Path) -> "Workspace":
+    def create(cls, root: str | Path) -> Workspace:
         root = Path(root).resolve()
         snaps = Path(tempfile.mkdtemp(prefix="tether-snap-"))
         return cls(root=root, snapshots=snaps)
@@ -163,8 +163,10 @@ def run_bash(ws: Workspace, command: str, timeout: int = 120, sandbox: object = 
     if sandbox is not None:
         proc = sandbox.run(command, timeout=timeout)
     else:
+        # check=False on purpose: a non-zero exit is a result the model should
+        # see and reason about, not an exception that ends the turn.
         proc = subprocess.run(command, shell=True, cwd=ws.root, capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, timeout=timeout, check=False)
     parts = []
     if proc.stdout:
         parts.append(proc.stdout)

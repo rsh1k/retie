@@ -10,6 +10,7 @@ dependencies = ["httpx>=0.27", "revoco>=0.5.1", "cryptography"]
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.116"]
+dev = ["ruff>=0.5"]
 
 [project.scripts]
 tether = "tether.cli:main"

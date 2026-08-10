@@ -19,9 +19,10 @@ successful injection can reach is.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from revoco import ControlPlane, Effect
 from revoco.gate.policy import Policy, Rule
@@ -96,10 +97,7 @@ class FileStateReader:
     before the action is allowed to depend on it.
     """
 
-    def __init__(self, ws: Workspace) -> None:
-        self.ws = ws
-
-    def __init__(self, ws: Workspace, sandbox: Any = None) -> None:  # noqa: F811
+    def __init__(self, ws: Workspace, sandbox: Any = None) -> None:
         self.ws = ws
         self.sandbox = sandbox
 

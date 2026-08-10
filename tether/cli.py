@@ -25,7 +25,7 @@ def _ask(tool: str, description: str, args: dict[str, Any]) -> bool:
     if tool == "bash":
         print(f"{DIM}  this cannot be undone once it runs{RESET}")
     try:
-        answer = input(f"  allow? [y/N] ").strip().lower()
+        answer = input("  allow? [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
         return False
@@ -104,7 +104,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 print(f"\n{RED}out of quota{RESET} ({exc.kind})")
                 if exc.kind == "weekly":
                     print(f"{DIM}  This is an account-wide weekly cap, so no other")
-                    print(f"  model will work either — it resets 7 days after it")
+                    print("  model will work either — it resets 7 days after it")
                     print(f"  started. Tried: {', '.join(exc.tried)}{RESET}\n")
                 else:
                     print(f"{DIM}  Session limits reset about every 5 hours.")

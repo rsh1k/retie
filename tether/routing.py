@@ -95,11 +95,11 @@ class LimitKind:
     UNKNOWN = "unknown"
 
 
-_WEEKLY = re.compile(r"week|weekly", re.I)
-_SESSION = re.compile(r"session|5\s*hour|five\s*hour", re.I)
+_WEEKLY = re.compile(r"week|weekly", re.IGNORECASE)
+_SESSION = re.compile(r"session|5\s*hour|five\s*hour", re.IGNORECASE)
 
 
-_SUBSCRIPTION = re.compile(r"subscription|upgrade|requires (?:a |both )?(?:Pro|Max|Team)", re.I)
+_SUBSCRIPTION = re.compile(r"subscription|upgrade|requires (?:a |both )?(?:Pro|Max|Team)", re.IGNORECASE)
 
 
 def classify_limit(status: int, body: str, headers: dict[str, str] | None = None) -> str:
@@ -151,7 +151,7 @@ class Usage:
     accessible: dict[str, bool] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path) -> "Usage":
+    def load(cls, path: Path) -> Usage:
         if path.is_file():
             try:
                 d = json.loads(path.read_text())

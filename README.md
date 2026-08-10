@@ -5,7 +5,7 @@ A coding agent for the terminal that classifies every action by **how hard it is
 It works the way Claude Code works: you talk to it in a terminal, it reads and edits files in your project, runs your tests. The difference is what sits between the model and your filesystem.
 
 ```bash
-pipx install tether                 # not yet published — see Status
+pipx install tether
 export OLLAMA_API_KEY=...           # https://ollama.com/settings/keys
 tether run ./my-project
 ```
@@ -134,7 +134,9 @@ Worth stating plainly: revoco's `PRA02` detector caught the first version of thi
 
 ## Status
 
-Working, not released.
+Published to PyPI as [`tether`](https://pypi.org/project/tether/) — the name was free, checked including PyPI's case and separator folding. (`tether-agent` exists but is an MQTT/IPC library, unrelated domain.)
+
+Releases are automatic: push to `main`, a patch version publishes via Trusted Publishing with no API token anywhere. See [docs/RELEASING.md](docs/RELEASING.md) — there is one manual PyPI form to fill in before the first release works.
 
 - **Ollama Cloud path: verified live.** A full session on `gpt-oss:20b` read the file, edited it, and ran a shell command to check its own work. Streaming, tool-call reassembly, the gate, the sandbox, the ledger and usage accounting all held.
 - **Anthropic path**: tested through the fake backend only, not against the live API.

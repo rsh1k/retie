@@ -81,7 +81,7 @@ def detect(allow_network: bool = False) -> SandboxReport:
     probe = subprocess.run(
         [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
          "--unshare-all", "--die-with-parent", "true"],
-        capture_output=True, text=True, timeout=20)
+        capture_output=True, text=True, timeout=20, check=False)
     if probe.returncode != 0:
         detail = (probe.stderr or "").strip().splitlines()
         return SandboxReport(False, "bwrap",
@@ -173,8 +173,10 @@ class Sandbox:
     def run(self, command: str, timeout: int = 120) -> subprocess.CompletedProcess:
         if not self.report.available:
             raise RuntimeError(f"sandbox unavailable: {self.report.reason}")
+        # check=False on purpose: a non-zero exit is information the model needs,
+        # not an exception. A failing test is a normal result here.
         return subprocess.run(self._argv(command), capture_output=True,
-                              text=True, timeout=timeout)
+                              text=True, timeout=timeout, check=False)
 
     # -- reversibility ----------------------------------------------------
     def snapshot(self) -> str:
@@ -211,11 +213,11 @@ class Sandbox:
     def caveats(self) -> list[str]:
         """Everything this sandbox does not protect, stated rather than implied."""
         out = [
-            f"directories excluded from the snapshot are not restored: "
-            f"{', '.join(sorted(SKIP_DIRS))}",
-            "the snapshot captures the workspace only — changes the command "
-            "makes to its own memory, to running processes, or to anything "
-            "outside the workspace are not covered",
+            ("directories excluded from the snapshot are not restored: "
+             f"{', '.join(sorted(SKIP_DIRS))}"),
+            ("the snapshot captures the workspace only — changes the command "
+             "makes to its own memory, to running processes, or to anything "
+             "outside the workspace are not covered"),
         ]
         if self.report.network:
             out.append("network is ENABLED: anything read can be sent out, and "
