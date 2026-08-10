@@ -31,19 +31,22 @@ OLLAMA_BASE_URL = "https://ollama.com/v1"
 # code but loses the thread after twenty tool calls is useless here.
 #
 # Published figures are vendor-run and should be treated as directional.
+# Notes are ours. Which of these an account may actually call is discovered at
+# runtime, not listed here — on a free plan most of the catalogue returns 403,
+# and hard-coding an entitlement guess would be wrong for every other reader.
 OLLAMA_MODELS = {
-    "kimi-k2.7-code": "code-specialised; the Kimi line has the strongest published "
-                      "agentic-loop stability (4,000+ tool calls in one session). "
-                      "256K context.",
-    "glm-5.2": "marginally stronger on coding benchmarks and 1M context, with less "
-               "published evidence about long tool-calling runs.",
-    "qwen3.5:397b": "strong general model with a long history of reliable tool calling.",
-    "deepseek-v4-pro": "strong reasoning; worth testing if the others stall on hard tasks.",
+    "gpt-oss:20b": "smallest and fastest; verified working on a free plan. Emits a "
+                   "separate `reasoning` field, and needs a generous max_tokens or "
+                   "the reasoning consumes the whole budget and content comes back "
+                   "empty.",
     "gpt-oss:120b": "OpenAI's open-weight model, built with tool use in mind.",
-    "gpt-oss:20b": "smallest and fastest here — the one to try when latency matters "
-                   "more than depth.",
+    "nemotron-3-super": "the heaviest model observed accessible without a subscription.",
+    "kimi-k2.7-code": "code-specialised, strongest published agentic-loop stability "
+                      "(4,000+ tool calls in one session) — but subscription-only.",
+    "glm-5.2": "marginally stronger on coding benchmarks, 1M context. Subscription-only.",
+    "deepseek-v4-pro": "strong reasoning. Subscription-only.",
 }
-DEFAULT_OLLAMA_MODEL = "kimi-k2.7-code"
+DEFAULT_OLLAMA_MODEL = "gpt-oss:20b"
 
 
 class ProviderRefused(RuntimeError):
@@ -124,6 +127,7 @@ class Turn:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     raw: Any = None
+    reasoning: str = ""
 
 
 class AnthropicBackend:
@@ -186,7 +190,8 @@ class OpenAICompatBackend:
     def __init__(self, model: str = DEFAULT_OLLAMA_MODEL, *,
                  base_url: str = OLLAMA_BASE_URL, api_key: str | None = None,
                  router: Router | None = None,
-                 on_switch: Callable[[str, str, str], None] | None = None) -> None:
+                 on_switch: Callable[[str, str, str], None] | None = None,
+                 on_reasoning: Callable[[str], None] | None = None) -> None:
         import os
 
         import httpx
@@ -199,6 +204,7 @@ class OpenAICompatBackend:
                 '{"ollama_api_key": "..."} or export OLLAMA_API_KEY.')
         self.router = router
         self.on_switch = on_switch
+        self.on_reasoning = on_reasoning
         self.model = model
         if router is not None:
             first = router.first()
@@ -234,7 +240,13 @@ class OpenAICompatBackend:
                 return turn
             except ProviderRefused as exc:
                 tried.append(model)
-                self.router.usage.block(model, exc.retry_after or 300, exc.kind)
+                if exc.kind == LimitKind.FORBIDDEN:
+                    # Not a quota problem and it never resolves by waiting, so
+                    # the model leaves the ladder for good rather than being
+                    # retried on every future session.
+                    self.router.usage.mark_forbidden(model)
+                else:
+                    self.router.usage.block(model, exc.retry_after or 300, exc.kind)
                 nxt = self.router.next_after(model, kind=exc.kind)
                 if nxt is None:
                     raise QuotaExhausted(exc.kind, exc.detail, tried) from exc
@@ -250,8 +262,13 @@ class OpenAICompatBackend:
             "messages": [{"role": "system", "content": system}] + messages,
             "tools": [s.openai() for s in specs],
             "stream": True,
+            # Without this the stream carries no usage at all — verified against
+            # the live endpoint, where the default response has zero usage
+            # chunks and the local accounting silently stayed at zero.
+            "stream_options": {"include_usage": True},
         }
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         # Tool-call arguments arrive as JSON fragments spread across deltas and
         # keyed by index, so they are reassembled per index before parsing.
         partial: dict[int, dict[str, Any]] = {}
@@ -261,7 +278,7 @@ class OpenAICompatBackend:
             if response.status_code != 200:
                 detail = response.read().decode("utf-8", "replace")[:400]
                 headers = {k.lower(): v for k, v in response.headers.items()}
-                if response.status_code in (429, 402, 503):
+                if response.status_code in (429, 402, 403, 503):
                     raise ProviderRefused(
                         classify_limit(response.status_code, detail, headers),
                         detail, _retry_after(headers))
@@ -288,6 +305,16 @@ class OpenAICompatBackend:
                 if delta.get("content"):
                     text_parts.append(delta["content"])
                     on_text(delta["content"])
+                if delta.get("reasoning"):
+                    # gpt-oss models stream their scratchpad in a `reasoning`
+                    # field beside `content`. It is kept out of the assistant
+                    # text — sending it back as conversation would teach the
+                    # model that its own thinking-aloud is dialogue — but it is
+                    # captured so a caller can display it the way an IDE shows
+                    # a thinking pane.
+                    reasoning_parts.append(delta["reasoning"])
+                    if self.on_reasoning:
+                        self.on_reasoning(delta["reasoning"])
                 for tc in delta.get("tool_calls") or []:
                     idx = tc.get("index", 0)
                     slot = partial.setdefault(idx, {"id": "", "name": "", "args": ""})
@@ -313,7 +340,8 @@ class OpenAICompatBackend:
                 args = {"__parse_error__": slot["args"][:400]}
             calls.append(ToolCall(slot["id"] or f"call_{idx}", slot["name"], args))
 
-        return Turn(text="".join(text_parts), tool_calls=calls)
+        return Turn(text="".join(text_parts), tool_calls=calls,
+                    reasoning="".join(reasoning_parts))
 
     def assistant_message(self, turn: Turn) -> dict[str, Any]:
         msg: dict[str, Any] = {"role": "assistant", "content": turn.text or None}
@@ -333,10 +361,12 @@ class OpenAICompatBackend:
 
 def make_backend(kind: str, model: str | None, *, effort: str = "high",
                  api_key: str | None = None, router: Router | None = None,
-                 on_switch: Callable[[str, str, str], None] | None = None) -> Any:
+                 on_switch: Callable[[str, str, str], None] | None = None,
+                 on_reasoning: Callable[[str], None] | None = None) -> Any:
     if kind == "anthropic":
         return AnthropicBackend(model or ANTHROPIC_MODEL, effort=effort)
     if kind == "ollama":
         return OpenAICompatBackend(model or DEFAULT_OLLAMA_MODEL, api_key=api_key,
-                                   router=router, on_switch=on_switch)
+                                   router=router, on_switch=on_switch,
+                                   on_reasoning=on_reasoning)
     raise ValueError(f"unknown provider {kind!r}")

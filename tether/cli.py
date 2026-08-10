@@ -7,6 +7,7 @@ put things back, and prove the record wasn't touched.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -141,6 +142,43 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Find out which models this account may actually call.
+
+    Worth running once. Ollama publishes an eighteen-model catalogue, but a
+    free plan is entitled to a fraction of it and the rest answer 403. Without
+    this the ladder is mostly models the user cannot use, and every session
+    pays a failed request to rediscover that.
+    """
+    from .providers import _key_from_config
+    from .routing import Usage, discover, probe
+
+    key = os.environ.get("OLLAMA_API_KEY") or _key_from_config()
+    if not key:
+        print(f"{RED}no API key{RESET} — see `tether run --help`")
+        return 2
+    usage = Usage.load(Path(args.usage).expanduser())
+    models = sorted(discover(), key=lambda m: (m.tier, m.size_bytes))
+    print(f"{BOLD}probing {len(models)} models{RESET} "
+          f"{DIM}· one token each; entitlement is checked before generation{RESET}\n")
+
+    def show(m, verdict, detail):
+        mark = ({True: f"{GREEN}yes{RESET}", False: f"{RED}no {RESET}"}
+                .get(verdict, f"{YELLOW}? {RESET}"))
+        print(f"  {mark}  tier {m.tier}  {m.name:<28}{DIM}{detail}{RESET}")
+
+    result = probe(models, usage, key, on_result=show)
+    yes = sum(1 for v in result.values() if v is True)
+    unknown = sum(1 for v in result.values() if v is None)
+    print(f"\n  {yes}/{len(models)} confirmed accessible"
+          + (f", {unknown} inconclusive (left eligible)" if unknown else "")
+          + f" · cached in {args.usage}")
+    usable = [m.name for m in models if result.get(m.name) is not False]
+    if usable:
+        print(f"  {DIM}the ladder will start on {usable[0]}{RESET}")
+    return 0
+
+
 def cmd_usage(args: argparse.Namespace) -> int:
     """Show what this tool has spent, and the ladder it would climb.
 
@@ -238,6 +276,10 @@ def main(argv: list[str] | None = None) -> int:
 
     mod = sub.add_parser("models", help="list the hosted models Ollama Cloud runs")
     mod.set_defaults(func=cmd_models)
+
+    prb = sub.add_parser("probe", help="find which models this account may call")
+    prb.add_argument("--usage", default="~/.tether/usage.json")
+    prb.set_defaults(func=cmd_probe)
 
     usg = sub.add_parser("usage", help="what this tool has spent, and the model ladder")
     usg.add_argument("--usage", default="~/.tether/usage.json")

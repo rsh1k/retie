@@ -91,11 +91,15 @@ class LimitKind:
     SESSION = "session"      # resets in ~5h — worth downshifting or waiting
     WEEKLY = "weekly"        # resets in ~7 days — nothing to do but stop
     RATE = "rate"            # short-term throttle — retry after a pause
+    FORBIDDEN = "forbidden"  # needs a paid plan — never retry, drop from the ladder
     UNKNOWN = "unknown"
 
 
 _WEEKLY = re.compile(r"week|weekly", re.I)
 _SESSION = re.compile(r"session|5\s*hour|five\s*hour", re.I)
+
+
+_SUBSCRIPTION = re.compile(r"subscription|upgrade|requires (?:a |both )?(?:Pro|Max|Team)", re.I)
 
 
 def classify_limit(status: int, body: str, headers: dict[str, str] | None = None) -> str:
@@ -106,9 +110,14 @@ def classify_limit(status: int, body: str, headers: dict[str, str] | None = None
     like a session limit — worth one downshift — because assuming the
     pessimistic case would stop a user who could still work.
     """
+    text = body or ""
+    # A 403 for a paid-only model is not a quota problem and never resolves by
+    # waiting. Treating it as one would keep a model on the ladder that this
+    # account can never use, and re-try it on every session forever.
+    if status == 403 or _SUBSCRIPTION.search(text):
+        return LimitKind.FORBIDDEN
     if status != 429:
         return LimitKind.UNKNOWN
-    text = body or ""
     if _WEEKLY.search(text):
         return LimitKind.WEEKLY
     if _SESSION.search(text):
@@ -136,6 +145,10 @@ class Usage:
     weighted: float = 0.0
     started: float = field(default_factory=time.time)
     blocked_until: dict[str, float] = field(default_factory=dict)
+    # Which models this account may actually call. Discovered rather than
+    # assumed: on a free plan most of the catalogue returns 403, and a ladder
+    # built from the published list is mostly models the user cannot use.
+    accessible: dict[str, bool] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "Usage":
@@ -147,7 +160,8 @@ class Usage:
                            output_tokens=d.get("output_tokens", 0),
                            weighted=d.get("weighted", 0.0),
                            started=d.get("started", time.time()),
-                           blocked_until=d.get("blocked_until", {}))
+                           blocked_until=d.get("blocked_until", {}),
+                           accessible=d.get("accessible", {}))
             except (json.JSONDecodeError, OSError):
                 pass          # a corrupt counter must not stop the session
         return cls(path=path)
@@ -158,7 +172,8 @@ class Usage:
             self.path.write_text(json.dumps({
                 "calls": self.calls, "prompt_tokens": self.prompt_tokens,
                 "output_tokens": self.output_tokens, "weighted": self.weighted,
-                "started": self.started, "blocked_until": self.blocked_until}))
+                "started": self.started, "blocked_until": self.blocked_until,
+                "accessible": self.accessible}))
         except OSError:
             pass
 
@@ -167,6 +182,11 @@ class Usage:
         self.prompt_tokens += prompt
         self.output_tokens += output
         self.weighted += (prompt + output) / 1000.0 * model.weight
+        self.save()
+
+    def mark_forbidden(self, model: str) -> None:
+        """Drop a model permanently: the account is not entitled to it."""
+        self.accessible[model] = False
         self.save()
 
     def block(self, model: str, seconds: float, reason: str) -> None:
@@ -201,7 +221,11 @@ class Router:
         self.all = {m.name: m for m in models}
         self.usage = usage
         self.max_tier = max_tier
-        pool = [m for m in models if m.tier <= max_tier]
+        # Models known to be forbidden are excluded outright. Unknown ones stay
+        # in — the first call discovers them, and one 403 is cheaper than making
+        # the user run a probe before they can start.
+        pool = [m for m in models
+                if m.tier <= max_tier and usage.accessible.get(m.name, True)]
         # Cheapest first; ties broken by size so the order is stable run to run.
         self.ladder = sorted(pool, key=lambda m: (m.tier, m.size_bytes, m.name))
         if preferred and preferred in self.all:
@@ -224,6 +248,8 @@ class Router:
         answering "try this one instead" would be a lie that costs the user
         eighteen more failed requests before they learn the truth.
         """
+        # A weekly cap is account-wide, so the next model is refused for the
+        # same reason. A 403 is per model, so the ladder continues.
         if kind == LimitKind.WEEKLY:
             return None
         for m in self.candidates():
@@ -257,4 +283,48 @@ def discover(base_url: str = "https://ollama.com", timeout: float = 20.0) -> lis
             continue
         size = int(m.get("size") or 0)
         out.append(ModelInfo(name=name, size_bytes=size, tier=tier_for(size)))
+    return out
+
+
+def probe(models: list[ModelInfo], usage: Usage, api_key: str,
+          base_url: str = "https://ollama.com/v1", timeout: float = 90.0,
+          on_result: Any = None) -> dict[str, bool | None]:
+    """Find out which models this account may actually call, and remember it.
+
+    A one-token request is enough: entitlement is checked before generation, so
+    a refusal costs nothing and a success costs almost nothing.
+
+    Only a definitive answer is cached. A timeout or a connection error is
+    recorded as *unknown*, not as "no" — a cold model that took too long to
+    wake would otherwise be dropped from the ladder permanently on the strength
+    of one slow request. Unknown models stay eligible and get re-tested by the
+    next real call, which is the cheaper mistake to make.
+    """
+    import httpx
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    out: dict[str, bool | None] = {}
+    for m in models:
+        try:
+            r = httpx.post(f"{base_url}/chat/completions", headers=headers, timeout=timeout,
+                           json={"model": m.name, "max_tokens": 1,
+                                 "messages": [{"role": "user", "content": "hi"}]})
+            if r.status_code == 200:
+                verdict, detail = True, ""
+            elif classify_limit(r.status_code, r.text) == LimitKind.FORBIDDEN:
+                verdict = False
+                detail = (r.json().get("error", {}) or {}).get("message", "")[:60]
+            else:
+                # A quota refusal says nothing about entitlement.
+                verdict, detail = None, f"{r.status_code} (inconclusive)"
+        except Exception as exc:  # noqa: BLE001
+            verdict, detail = None, f"{type(exc).__name__} — inconclusive, left eligible"
+        out[m.name] = verdict
+        if verdict is None:
+            usage.accessible.pop(m.name, None)
+        else:
+            usage.accessible[m.name] = verdict
+        if on_result:
+            on_result(m, verdict, detail)
+    usage.save()
     return out

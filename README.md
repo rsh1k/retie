@@ -47,6 +47,16 @@ The default provider is [Ollama Cloud](https://ollama.com): frontier-scale open 
 
 Reached over Ollama's OpenAI-compatible endpoint at `https://ollama.com/v1`. Worth noting because Ollama's own compatibility docs cover only the local server, and secondary sources claim the cloud is *not* OpenAI-compatible — it is; verified against the live endpoint, not inferred.
 
+### Most of the catalogue is not free — run `tether probe` first
+
+Ollama publishes 18 cloud models. On a free plan, **7 were accessible**; the other 11 answer `403 this model requires a subscription`. That includes every model you would pick from a benchmark table — `kimi-k2.7-code`, `glm-5.2`, `qwen3.5:397b`, `deepseek-v4-pro`.
+
+```bash
+tether probe        # one token each; entitlement is checked before generation, so refusals are free
+```
+
+Results are cached, so the ladder is built from models you can actually call rather than from the published list. A `403` during a session drops that model permanently — it is not a quota problem and never resolves by waiting. A **timeout is recorded as inconclusive, not as a denial**: a cold model that took too long to wake would otherwise be dropped forever on the strength of one slow request.
+
 ### Rotating models does not defeat a quota
 
 The obvious design is "when one model is rate-limited, switch to another." **It does not work**, and it is worth knowing why before relying on it.
@@ -126,6 +136,14 @@ Worth stating plainly: revoco's `PRA02` detector caught the first version of thi
 
 Working, not released.
 
-- **Ollama Cloud path**: the loop, the tool schemas, and the SSE tool-call reassembly are tested against a mock OpenAI-shaped stream, including arguments split across deltas and parallel calls. **It has not yet been run against the live endpoint** — that needs an `OLLAMA_API_KEY`, and until someone does it, treat live behaviour as unverified.
-- **Anthropic path**: same, tested through the fake backend, not yet against the live API.
-- The safety plane, the sandbox, undo, and the ledger *are* exercised for real — `python demo.py`, no key required.
+- **Ollama Cloud path: verified live.** A full session on `gpt-oss:20b` read the file, edited it, and ran a shell command to check its own work. Streaming, tool-call reassembly, the gate, the sandbox, the ledger and usage accounting all held.
+- **Anthropic path**: tested through the fake backend only, not against the live API.
+- The safety plane, sandbox, undo and ledger are exercised without any key — `python demo.py`.
+
+Three things the live run found that mocks could not:
+
+1. **`gpt-oss` streams a separate `reasoning` field** beside `content`. It is kept out of the assistant text — feeding a model's own thinking-aloud back as dialogue teaches it that scratchpad is conversation — and surfaced dimmed instead. With a small `max_tokens` the reasoning consumes the whole budget and `content` comes back empty.
+2. **Usage is absent from the stream unless you ask for it.** `stream_options: {"include_usage": true}` is required; without it the local accounting silently stayed at zero.
+3. **Cheapest-first is not obviously right.** `gpt-oss:20b` fixed a one-line bug in **7 tool calls** — three globs and an `ls -R` to locate a file it had been given the name of. Seven tier-1 calls can cost more than two tier-3 calls. The ladder still starts cheap, but that is now a stated assumption rather than a proven one, and it is the next thing worth measuring.
+
+The ledger earned its place here. The model claimed *"verified with a test call that outputs 5"* — the ledger showed it really did run `python -c 'import calc…'`. A model's account of its own work is checkable against an independent record.
