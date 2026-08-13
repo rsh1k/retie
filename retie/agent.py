@@ -19,10 +19,20 @@ from typing import Any
 from .context import ContextStore
 from .providers import ToolCall, Turn
 from .safety import SafetyPlane
+from .session import Session, digest, record
 from .tools import Workspace
 from .toolspec import ToolSpec, build_specs, recall_spec
 
 MAX_STEPS = 40
+
+
+def _policy_id(plane: SafetyPlane) -> str:
+    """`name@digest` for the policy that gated this session, if reachable."""
+    try:
+        pol = plane.plane.gate.policy
+        return f"{pol.name}@{pol.digest()[:12]}"
+    except Exception:  # noqa: BLE001 - a missing label must not stop a session
+        return ""
 
 SYSTEM = """You are a coding agent working inside a single project directory.
 
@@ -51,6 +61,18 @@ class Agent:
         self.specs.append(recall_spec(self.context))
         self.by_name: dict[str, ToolSpec] = {s.name: s for s in self.specs}
         self.messages: list[dict[str, Any]] = []
+        self.session = Session(
+            model=getattr(backend, "model", "?"),
+            backend=getattr(backend, "name", "?"),
+            system_digest=digest(SYSTEM),
+            workspace=str(ws.root),
+            sandbox=str(plane.sandbox_report),
+            # Name and digest together: the name is readable, the digest is what
+            # proves the rules in force were the rules being claimed.
+            policy=_policy_id(plane),
+        )
+        plane.session_id = self.session.id
+        self._opened = False
 
     def _dispatch(self, call: ToolCall) -> str:
         """Run one tool call through the gate. The only place tools execute."""
@@ -73,6 +95,14 @@ class Agent:
 
     def send(self, text: str, on_text: Callable[[str], None]) -> None:
         """Run one user turn to completion, streaming assistant text out."""
+        if not self._opened:
+            # The first thing said is the objective every later action gets
+            # explained against, so the chain opens with it rather than with
+            # the first tool call.
+            self.session.objective = text
+            record(self.plane, "session.start", self.session.opening())
+            self._opened = True
+        self.session.turns += 1
         self.messages.append({"role": "user", "content": text})
 
         for _ in range(MAX_STEPS):
@@ -93,3 +123,8 @@ class Agent:
                 self.messages.append(payload)
 
         on_text(f"\n[stopped after {MAX_STEPS} tool calls without finishing]")
+
+    def close(self) -> None:
+        """Seal the session in the ledger. Safe to call more than once."""
+        if self._opened and self.session.ended is None:
+            record(self.plane, "session.end", self.session.closing())

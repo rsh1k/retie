@@ -177,6 +177,7 @@ class SafetyPlane:
         allow_network: bool = False,
     ) -> None:
         self.ws = workspace
+        self.session_id = ""      # set by the Agent once a session opens
         self.on_approval = on_approval
         self.auto_approve = auto_approve
         self.pending_snapshots: dict[str, str] = {}
@@ -278,6 +279,7 @@ class SafetyPlane:
             args=args,
             action="read" if tool in {"read", "glob", "grep"} else "write",
             description=_describe(tool, args),
+            session_id=self.session_id,
         )
         rev = getattr(verdict.reversibility, "value", str(verdict.reversibility))
 

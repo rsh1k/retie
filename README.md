@@ -122,6 +122,28 @@ Authority is rooted in a person. The agent holds a scoped, time-limited delegati
 
 A sandboxed shell command *is* undone — its workspace snapshot is the inverse. An unsandboxed one is not, and `undo_all` reports that as a skip rather than claiming success.
 
+## Replay a session
+
+```bash
+retie --ledger retie-ledger.db replay --last
+retie --ledger retie-ledger.db replay --markdown > session.md
+```
+
+```
+The add function subtracts. Fix it and prove it works.
+ses_e56066785aa6 · gpt-oss:20b · retie-default@68219a513562 · bwrap (no network)
+
+  09:34:48  ok        read     read calc.py
+  09:34:48  ok        edit     edit calc.py
+  09:34:48  ok        bash     run shell command: python -m pytest
+
+  3 actions · 0 refused · 0 not reversible · 1 turns · 1s
+```
+
+Manus ships shareable replays and they are a genuinely good feature. retie's differ in one way that matters: the chain is verified before anything is printed, so the replay is checkable rather than merely plausible. A replay you cannot verify is a story about a session.
+
+Refusals are rendered as prominently as successes, and a call that was refused never becomes an action — so it is attributed to the open session rather than dropped. A replay showing only what succeeded is exactly the misleading artefact the ledger exists to prevent.
+
 ## Evidence
 
 The ledger is hash-chained and verified from a **separate process**:
@@ -131,6 +153,8 @@ retie verify --ledger retie-ledger.db
 ```
 
 A log you can only check from inside the process that wrote it is a log, not evidence.
+
+The chain also opens with **what the agent was asked**: the objective in your own words, the model that served it, and digests of the policy and system prompt in force. Without that the record answers *what* happened but not *why*, and "why did it delete that?" is the first question anyone asks. The EU AI Act's Article 12, in force for high-risk systems since 2 August 2026, names inputs explicitly for the same reason.
 
 ## Built on
 

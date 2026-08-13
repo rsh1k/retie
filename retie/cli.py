@@ -142,6 +142,51 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_replay(args: argparse.Namespace) -> int:
+    """Read a session back out of the ledger.
+
+    The chain is verified first and the result is printed whichever way it
+    goes. A replay whose integrity is unstated invites the reader to assume it,
+    which is the assumption the ledger exists to remove.
+    """
+    from revoco.store import SqliteStore
+
+    from .replay import read, render, to_markdown, verify
+
+    try:
+        entries = SqliteStore(args.ledger).load_ledger()
+    except Exception as exc:  # noqa: BLE001
+        print(f"{RED}cannot read {args.ledger}:{RESET} {exc}")
+        return 1
+
+    ok, note = verify(entries)
+    views = read(entries)
+    if not views:
+        print(f"{DIM}no sessions in {args.ledger}{RESET}")
+        return 0
+
+    if args.session:
+        views = [v for v in views if v.id.startswith(args.session)]
+        if not views:
+            print(f"{RED}no session starting with {args.session!r}{RESET}")
+            return 1
+    elif args.last:
+        views = views[-1:]
+
+    if args.markdown:
+        for v in views:
+            print(to_markdown(v, ok, note))
+            print()
+        return 0 if ok else 1
+
+    banner = (f"{GREEN}chain verifies{RESET}" if ok else f"{RED}CHAIN BROKEN{RESET}")
+    print(f"{DIM}{args.ledger} · {note} · {RESET}{banner}\n")
+    for v in views:
+        print(render(v))
+        print()
+    return 0 if ok else 1
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
     """Find out which models this account may actually call.
 
@@ -276,6 +321,13 @@ def main(argv: list[str] | None = None) -> int:
 
     mod = sub.add_parser("models", help="list the hosted models Ollama Cloud runs")
     mod.set_defaults(func=cmd_models)
+
+    rep = sub.add_parser("replay", help="read a recorded session back out of the ledger")
+    rep.add_argument("--session", default="", help="session id, or a unique prefix")
+    rep.add_argument("--last", action="store_true", help="only the most recent session")
+    rep.add_argument("--markdown", action="store_true",
+                     help="emit Markdown for sharing rather than a terminal view")
+    rep.set_defaults(func=cmd_replay)
 
     prb = sub.add_parser("probe", help="find which models this account may call")
     prb.add_argument("--usage", default="~/.retie/usage.json")
