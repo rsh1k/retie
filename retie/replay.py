@@ -37,6 +37,7 @@ class Step:
     approved_by_human: bool = False
     at: float = 0.0
     undone: bool = False
+    findings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -56,6 +57,10 @@ class SessionView:
     @property
     def refused(self) -> list[Step]:
         return [s for s in self.steps if not s.allowed]
+
+    @property
+    def flagged(self) -> list[Step]:
+        return [s for s in self.steps if s.findings]
 
     @property
     def irreversible(self) -> list[Step]:
@@ -87,6 +92,7 @@ def read(entries: list[Any]) -> list[SessionView]:
     sessions: dict[str, SessionView] = {}
     order: list[str] = []
     current = "(before session records existed)"
+    pending_findings: list[str] = []
 
     def bucket(sid: str) -> SessionView:
         if sid not in sessions:
@@ -113,6 +119,17 @@ def read(entries: list[Any]) -> list[SessionView]:
             v.ended = p.get("ended_at")
             v.turns = p.get("turns", 0)
 
+        elif e.kind == "inspection":
+            # Written just before the verdict for the same call, so it is held
+            # and attached when that verdict arrives. Keeping it as its own
+            # entry rather than folding it into the verdict is deliberate: what
+            # was noticed and what was decided are separate facts, and a replay
+            # that shows only the decision cannot show a finding that was
+            # overridden.
+            pending_findings = [
+                f"{f.get('severity')}: {f.get('rule')}"
+                for f in p.get("findings", [])]
+
         elif e.kind == "verdict":
             act = by_action.get(p.get("action_id", ""), {})
             v = bucket(act.get("session_id") or current)
@@ -125,7 +142,9 @@ def read(entries: list[Any]) -> list[SessionView]:
                 reversibility=p.get("reversibility", ""),
                 approved_by_human=bool(p.get("approved_by_human")),
                 at=act.get("occurred_at") or getattr(e, "recorded_at", 0.0) or 0.0,
+                findings=pending_findings,
             ))
+            pending_findings = []
 
         elif e.kind in ("reversal_commit", "reversal"):
             aid = p.get("action_id")
@@ -182,11 +201,15 @@ def render(view: SessionView, *, colour: bool = True) -> str:
         else:
             mark, note = f"{G}ok{X}", ""
         out.append(f"  {D}{_clock(s.at)}{X}  {mark:<18} {s.tool:<8} {s.description[:52]}{note}")
+        for f in s.findings:
+            colour = R if f.startswith("high") else Y
+            out.append(f"              {colour}⚑ {f}{X}")
 
     out.append("")
     dur = f"{view.ended - view.started:.0f}s" if view.ended and view.started else "unfinished"
     out.append(f"{D}  {len(view.steps)} actions · {len(view.refused)} refused · "
-               f"{len(view.irreversible)} not reversible · {view.turns} turns · {dur}{X}")
+               f"{len(view.irreversible)} not reversible · {len(view.flagged)} flagged · "
+               f"{view.turns} turns · {dur}{X}")
     return "\n".join(out)
 
 
@@ -202,17 +225,19 @@ def to_markdown(view: SessionView, chain_ok: bool, chain_note: str) -> str:
         lines.append(f"- **Sandbox** {view.sandbox}")
     lines.append(f"- **Integrity** {'chain verifies' if chain_ok else 'CHAIN BROKEN'} "
                  f"({chain_note})")
-    lines += ["", "| Time | Outcome | Tool | What |", "|---|---|---|---|"]
+    lines += ["", "| Time | Outcome | Tool | What | Flagged |", "|---|---|---|---|---|"]
     for s in view.steps:
         outcome = ("refused" if not s.allowed
                    else s.reversibility + (" · human approved" if s.approved_by_human else ""))
         # Escaped outside the f-string: a backslash inside one is only legal on
         # Python 3.12+, and this package supports 3.10.
         what = s.description[:70].replace("|", "\\|")
-        lines.append(f"| {_clock(s.at)} | {outcome} | `{s.tool}` | {what} |")
+        flagged = "<br>".join(s.findings) or "—"
+        lines.append(f"| {_clock(s.at)} | {outcome} | `{s.tool}` | {what} | {flagged} |")
     lines += ["",
               (f"{len(view.steps)} actions, {len(view.refused)} refused, "
-               f"{len(view.irreversible)} not reversible."), "",
+               f"{len(view.irreversible)} not reversible, "
+               f"{len(view.flagged)} flagged by inspection."), "",
               ("_Rendered from a hash-chained ledger written as the session ran, "
                "not from the agent's account of it._")]
     return "\n".join(lines)

@@ -13,6 +13,7 @@ picks good tools is its problem; whether a bad pick can do damage is ours.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -20,6 +21,7 @@ from pathlib import Path
 from retie.agent import Agent
 from retie.providers import ToolCall, Turn
 from retie.safety import SafetyPlane
+from retie.replay import verify as _verify_chain
 from retie.tools import Workspace
 
 BOLD, DIM, GREEN, RED, RESET = "\033[1m", "\033[2m", "\033[32m", "\033[31m", "\033[0m"
@@ -211,6 +213,114 @@ def main() -> int:
     check_("and the model is warned in the same breath", "hostile" in fenced)
     check_("the payload is still delivered, not silently dropped", evil in fenced,
            "hiding it would leave the model reasoning from a gap")
+
+
+    # -- inspection: the second gate dimension -----------------------------
+    print(f"\n{BOLD}reversible is not the same as safe{RESET}\n")
+
+    from retie.inspect import inspect_write, worst
+
+    guarded = ("@login_required\n"
+               "def transfer(req):\n"
+               "    validate_amount(req.amount)\n"
+               "    return requests.post(URL, verify=True)\n")
+
+    # Content rules. The negative cases matter more than the positive ones: a
+    # scanner that flags `API_KEY = os.environ[...]` trains its user to stop
+    # reading, and after that it protects nothing.
+    for label, path, body, want in [
+        ("a hardcoded credential is caught", "cfg.py",
+         'API_KEY = "sk_live_9f3ba21cc4e7d80f1a"\n', "high"),
+        ("an env lookup is not", "cfg.py", 'API_KEY = os.environ["API_KEY"]\n', "none"),
+        ("a placeholder is not", "cfg.py", 'API_KEY = "your-key-here"\n', "none"),
+        ("disabled TLS verification is caught", "net.py",
+         "requests.get(url, verify=False)\n", "high"),
+        ("prose is not code", "README.md", 'password = "hunter2supersecret"\n', "none"),
+        ("parameterised SQL is not flagged", "db.py",
+         'cur.execute("SELECT * FROM t WHERE id=%s", (uid,))\n', "none"),
+    ]:
+        check_(label, worst(inspect_write(path, body)) == want,
+               f"{path}: {want}")
+
+    # Removal rules. This is the half that is not just another linter — the
+    # evidence is in what stopped being there, which is also exactly what a
+    # hijacked agent does, because removing a control is the cheapest way to
+    # make an obstacle go away.
+    stripped = "def transfer(req):\n    return requests.post(URL, verify=False)\n"
+    found = {f.rule for f in inspect_write("pay.py", stripped, prior=guarded)}
+    check_("a removed auth check is caught", "auth-check-removed" in found)
+    check_("a removed certificate check is caught", "crypto-verification-removed" in found)
+    check_("a removed validation step is caught", "validation-removed" in found)
+
+    # The false positive that made the first implementation unshippable: the
+    # line-set version saw an edited line as a deleted one, so adding a timeout
+    # to a call that still said `verify=True` reported a removed crypto check.
+    benign = guarded.replace("verify=True", "verify=True, timeout=5")
+    check_("editing a guarded line in place is not a removal",
+           inspect_write("pay.py", benign, prior=guarded) == [],
+           "counting matches, not comparing lines")
+
+    # Word-bounded on purpose: a bare str.replace here turns `@login_required`
+    # into `@login_requestuired`, which really is the decorator going missing.
+    renamed = re.sub(r"\breq\b", "request", guarded)
+    check_("renaming a variable is not a removal",
+           inspect_write("pay.py", renamed, prior=guarded) == [])
+
+    # And it must still fire when one of several guards goes.
+    two = guarded.replace("@login_required", "@login_required\n@permission_required")
+    dropped = {f.rule for f in inspect_write("pay.py", guarded, prior=two)}
+    check_("dropping one of two auth checks still fires",
+           "auth-check-removed" in dropped,
+           "a count that only checks for zero would miss this")
+
+    # -- and that inspection actually changes what the gate does ------------
+    print(f"\n{BOLD}a flagged write reaches a person; a clean one does not{RESET}\n")
+
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        (root / "pay.py").write_text(guarded)
+        ws = Workspace.create(root)
+        asked: list[str] = []
+        plane = SafetyPlane(ws, ledger_path=root / "l.db",
+                            on_approval=lambda t, desc, a: asked.append(desc) or True)
+        plane.session_id = "ses_test"
+
+        plane.guard("write", {"path": "fine.py", "content": "x = 1\n"}, lambda: "ok")
+        check_("a clean write runs without asking", not asked)
+
+        plane.guard("write", {"path": "cfg.py",
+                              "content": 'API_KEY = "sk_live_9f3ba21cc4e7d80f1a"\n'},
+                    lambda: "ok")
+        check_("a reversible write with a secret in it asks anyway", len(asked) == 1,
+               "reversibility is not the question inspection answers")
+        check_("and the prompt says why", "hardcoded-secret" in (asked[-1] if asked else ""),
+               "approving a bare filename is approving nothing")
+
+        before = len(asked)
+        plane.guard("edit", {"path": "pay.py", "old": "verify=True",
+                             "new": "verify=True, timeout=5"}, lambda: "ok")
+        check_("a benign edit still runs without asking", len(asked) == before,
+               "the noise floor is what makes the signal usable")
+
+        # Declining is normal use. It used to count as an authorization
+        # violation, so three sensible refusals quarantined the agent.
+        strict = SafetyPlane(ws, ledger_path=root / "l2.db",
+                             on_approval=lambda *a: False)
+        strict.session_id = "ses_strict"
+        for _ in range(4):
+            strict.guard("write", {"path": "s.py",
+                                   "content": 'TOKEN = "sk_live_9f3ba21cc4e7d80f1a"\n'},
+                         lambda: "ok")
+        after = strict.guard("write", {"path": "ok.py", "content": "y = 2\n"}, lambda: "ok")
+        check_("refusing repeatedly does not quarantine the agent", after.allowed,
+               "a person exercising the control is not the agent misbehaving")
+
+        entries = list(strict.plane.ledger.entries())
+        insp = [e for e in entries if e.kind == "inspection"]
+        check_("findings are written into the hash chain", len(insp) >= 4,
+               "a finding that only reached the terminal is not evidence")
+        ok_chain, note = _verify_chain(entries)
+        check_("and the chain still verifies with them in it", ok_chain, note)
 
     print(f"\n{'all checks passed' if not failures else str(failures) + ' FAILED'}\n")
     return 1 if failures else 0

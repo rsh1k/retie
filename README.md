@@ -41,6 +41,30 @@ That is also the fix for approval fatigue. A gate that prompts on every shell co
 
 Run `python demo.py` to see all of it without spending a model call.
 
+## Reversible is not the same as safe
+
+The gate above asks one question — can this be undone? That is the right first question and it is not the only one. A hardcoded credential, a `verify=False` slipped into a TLS call, a permission decorator quietly dropped: all perfectly reversible, none of them things to wave through. So writes carry a second, independent dimension.
+
+| Written content | Risk | What happens |
+|---|---|---|
+| clean | 0 | runs, no prompt |
+| `subprocess.run(cmd, shell=True)`, SQL built by interpolation | medium | recorded in the ledger, still runs |
+| `API_KEY = "sk_live_…"`, `verify=False`, an auth check removed | high | stops and asks a person |
+
+Reversibility decides whether an action is *recoverable*; inspection decides whether it is *advisable*. They are separate axes, both end up in the record, and the risk score is fed to the same policy engine rather than short-circuiting it — the gate stays the only thing that decides.
+
+The half that is not just another linter is the **diff**. Pattern-matching new text for `password = "..."` is table stakes. The check with real signal is what the code *stopped* containing:
+
+```
+edit pay.py
+  ⚑ high: auth-check-removed          (1 → 0)
+  ⚑ high: crypto-verification-removed (1 → 0)
+```
+
+Nothing in the new text looks wrong — the evidence is in what is missing. That is also precisely what a hijacked agent does, because disabling a control is the cheapest way to make an obstacle disappear.
+
+Rules are counted per file rather than diffed line by line, which is what keeps the noise down. The first implementation compared sets of lines, so appending a `timeout=5` to a call that still said `verify=True` reported a removed certificate check — a high-severity finding on a completely benign edit. A rule that cries wolf on ordinary work gets waved through, and a check that is always waved through costs attention while protecting nothing. Counting matches asks the question actually meant: does this file still have as many of these guards as it had? An in-place edit keeps the count and stays silent; dropping one of three auth checks still fires.
+
 ## Models, and how the quota is stretched
 
 The default provider is [Ollama Cloud](https://ollama.com): frontier-scale open models — `qwen3.5:397b`, `mistral-large-3:675b`, `kimi-k2.7-code`, `glm-5.2`, `deepseek-v4-pro`, `gpt-oss:120b` — running on their infrastructure. Nothing to download, no GPU. That matters: a 397B model will not run on a laptop, and a model small enough to run on one tends to lose the thread partway through an agent loop.
@@ -153,9 +177,11 @@ ses_e56066785aa6 · gpt-oss:20b · retie-default@68219a513562 · bwrap (no netwo
 
   09:34:48  ok        read     read calc.py
   09:34:48  ok        edit     edit calc.py
+  09:34:48  ok        write    write config.py
+              ⚑ high: hardcoded-secret
   09:34:48  ok        bash     run shell command: python -m pytest
 
-  3 actions · 0 refused · 0 not reversible · 1 turns · 1s
+  4 actions · 0 refused · 0 not reversible · 1 flagged · 1 turns · 1s
 ```
 
 Manus ships shareable replays and they are a genuinely good feature. retie's differ in one way that matters: the chain is verified before anything is printed, so the replay is checkable rather than merely plausible. A replay you cannot verify is a story about a session.
@@ -187,6 +213,7 @@ Worth stating plainly: revoco's `PRA02` detector caught the first version of thi
 - **No seccomp filter yet.** `Seccomp: 0` inside the sandbox — namespaces and mounts are enforced, syscalls are not filtered. That is the next hardening step.
 - **File tools are not sandboxed**, only path-confined in-process. They cannot execute anything, so the exposure is different in kind, but it is not the same guarantee.
 - **No supply-chain or rogue-agent coverage** (OWASP ASI04, ASI10). Out of scope for now rather than partially done.
+- **Inspection is regex over one file, and knows nothing about your architecture.** Commercial tools in this space back the same idea with a graph of the customer's codebase and a risk model built from many organisations' findings; that is data rather than code, and pretending a few hundred lines of pattern matching is the same thing would be dishonest. What this does is narrower and stated: catch specific, checkable things an agent does to the code in front of it. It will miss anything requiring cross-file reasoning, and it has no published false-positive rate — only the negative cases pinned in `test_loop.py`.
 - **`--network` re-opens exfiltration.** Needed for installs; when it is on, anything the command reads can leave, and no filesystem snapshot undoes that. The CLI says so at startup.
 - **Approval fatigue is real.** If every `bash` prompt gets a reflexive yes, the gate is decoration. `--yes` exists for scripted runs and prints a warning, because a control that is always bypassed should say so.
 - **Keys are per-session.** The human and agent keypairs are generated at startup, so the delegation chain proves integrity within a session but does not yet carry identity across them.

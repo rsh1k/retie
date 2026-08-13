@@ -14,7 +14,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from retie.safety import SafetyPlane
+from retie.safety import RISK_APPROVAL, SafetyPlane, risk_of
 from retie.tools import Workspace, edit_file, read_file, run_bash, write_file
 
 BOLD, DIM, GREEN, RED, YELLOW, RESET = (
@@ -72,7 +72,42 @@ def main() -> int:
         print(f"  bash stopped for a human: unconfined, so nothing can undo it.")
     print(f"  the path escape was refused before the gate ever saw it.{RESET}")
 
-    print(f"\n{BOLD}2. undo{RESET}\n")
+    print(f"\n{BOLD}2. reversible is not the same as safe{RESET}\n")
+    print(f"  {'what is written':<44} {'risk':<5} {'asked?':<7} flagged")
+    print(f"  {'-'*44} {'-'*5} {'-'*7} {'-'*44}")
+
+    (root / "pay.py").write_text(
+        "@login_required\ndef transfer(req):\n"
+        "    return requests.post(URL, verify=True)\n")
+
+    risky = [
+        ("a clean write", "write",
+         {"path": "fine.py", "content": "x = 1\n"}),
+        ("a credential written into source", "write",
+         {"path": "cfg.py", "content": 'API_KEY = "sk_live_9f3ba21cc4e7d80f1a"\n'}),
+        ("the same name, but read from the environment", "write",
+         {"path": "cfg.py", "content": 'API_KEY = os.environ["API_KEY"]\n'}),
+        ("turning certificate verification off", "edit",
+         {"path": "pay.py", "old": "verify=True", "new": "verify=False"}),
+        ("adding a timeout to that same line", "edit",
+         {"path": "pay.py", "old": "verify=True", "new": "verify=True, timeout=5"}),
+        ("removing the permission check", "edit",
+         {"path": "pay.py", "old": "@login_required\n", "new": ""}),
+    ]
+    for label, tool, args in risky:
+        found = plane._inspect(tool, args)
+        risk = risk_of(found)
+        asks = risk >= RISK_APPROVAL
+        mark = f"{RED}yes{RESET}   " if asks else f"{GREEN}no {RESET}   "
+        names = ", ".join(sorted({f.rule for f in found})) or f"{DIM}—{RESET}"
+        print(f"  {label:<44} {risk:<5} {mark:<7} {names}")
+
+    print(f"\n  {DIM}every one of these is perfectly reversible. reversibility decides")
+    print(f"  whether an action can be recovered; inspection decides whether it is")
+    print(f"  advisable. the removals are the half a linter cannot do — the evidence")
+    print(f"  is in what the file stopped containing.{RESET}")
+
+    print(f"\n{BOLD}3. undo{RESET}\n")
     print(f"  calc.py now      : {(root / 'calc.py').read_text().strip().splitlines()[-1].strip()}")
     receipt = plane.undo(outcomes["edit"].verdict.action_id)
     print(f"  undo the edit    : ok={receipt.ok}")
@@ -84,7 +119,7 @@ def main() -> int:
           f"reversed={d.get('reversed_ok')} failed={d.get('failed')}")
     print(f"  notes.md         : {'removed' if not (root / 'notes.md').exists() else 'STILL THERE'}")
 
-    print(f"\n{BOLD}3. the record, verified from a separate process{RESET}\n")
+    print(f"\n{BOLD}4. the record, verified from a separate process{RESET}\n")
     proc = subprocess.run(
         [sys.executable, "-c",
          "import sys;from revoco.store import SqliteStore;"

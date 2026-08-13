@@ -28,8 +28,24 @@ from revoco import ControlPlane, Effect
 from revoco.gate.policy import Policy, Rule
 from revoco.reversal import InverseRegistry, Reversibility
 
+from .inspect import Finding, inspect_write, worst
 from .sandbox import Sandbox, detect, snapshottable
 from .tools import ToolError, Workspace, inverse_specs
+
+# Inspection severity expressed as a risk number, because that is the vocabulary
+# the policy already speaks. Both sit under the delegation's `max_risk` of 40 so
+# a flagged write is *approvable* rather than scope-rejected — the point is to
+# put a person in front of it, not to make it impossible.
+RISK_HIGH = 30
+RISK_MEDIUM = 15
+RISK_APPROVAL = 25       # the threshold the policy rule keys on: high, not medium
+
+_RISK = {"high": RISK_HIGH, "medium": RISK_MEDIUM, "low": 5, "none": 0}
+
+
+def risk_of(findings: list[Finding]) -> int:
+    """Inspection severity translated into the number the policy keys on."""
+    return _RISK.get(worst(findings), 0)
 
 
 def default_policy() -> Policy:
@@ -54,6 +70,20 @@ def default_policy() -> Policy:
                 effect=Effect.ALLOW,
                 actions=("read",),
                 reason="observing changes nothing",
+            ),
+            # Above the permissive rule on purpose: first match wins, so this is
+            # the only way a reversible write reaches a human. It exists because
+            # "you can undo it" turned out not to mean "it is fine" — a
+            # hardcoded credential or a deleted certificate check is perfectly
+            # reversible and still nothing to wave through. Reversibility says
+            # whether an action is recoverable; the risk score says whether it
+            # is advisable, and they are different questions.
+            Rule(
+                id="risky-writes-need-a-human",
+                effect=Effect.REQUIRE_APPROVAL,
+                actions=("write",),
+                min_risk=RISK_APPROVAL,
+                reason="inspection flagged something in this change worth a look",
             ),
             Rule(
                 id="reversible-writes-proceed",
@@ -181,6 +211,9 @@ class SafetyPlane:
         self.on_approval = on_approval
         self.auto_approve = auto_approve
         self.pending_snapshots: dict[str, str] = {}
+        # Findings for the call currently being authorised, so the approval
+        # prompt can explain itself. Scoped to one call and cleared each time.
+        self._findings: list[Finding] = []
 
         # Reversibility is decided by what this machine can actually do, so
         # the sandbox is probed before the specs are built rather than assumed.
@@ -267,11 +300,76 @@ class SafetyPlane:
             return True
         if self.on_approval is None:
             return False
-        return self.on_approval(tool, _describe(tool, args or {}), args or {})
+        what = _describe(tool, args or {})
+        # A person asked to approve "write config.py" with no reason will say
+        # yes, because that is an ordinary thing for a coding agent to do. The
+        # finding is the entire reason the prompt exists, so it goes in it.
+        if self._findings:
+            what += "\n    " + "\n    ".join(str(f) for f in self._findings)
+        return self.on_approval(tool, what, args or {})
+
+    # -- inspection -------------------------------------------------------
+    def _inspect(self, tool: str, args: dict[str, Any]) -> list[Finding]:
+        """Look at the content a write is about to produce.
+
+        This has to happen before `authorize`, because its output is an input to
+        the decision. For `edit` the resulting text is reconstructed from the
+        prior contents rather than guessed: the removal rules compare before
+        against after, so a wrong "after" would produce wrong findings, and
+        wrong findings are the thing that makes a check worthless.
+
+        Failure here is deliberately silent. Inspection is advisory — a
+        malformed file or an unreadable path should not take down a write that
+        the reversibility gate has no objection to. What must not happen is
+        inspection *appearing* to run and finding nothing, so the result is
+        recorded either way, including when it is empty.
+        """
+        if tool not in {"write", "edit"}:
+            return []
+        path = str(args.get("path", ""))
+        if not path:
+            return []
+        try:
+            target = self.ws.resolve(path)
+            prior = target.read_text(encoding="utf-8") if target.is_file() else None
+        except (ToolError, OSError, UnicodeDecodeError):
+            prior = None
+
+        if tool == "write":
+            content = str(args.get("content", ""))
+        else:
+            old, new = str(args.get("old", "")), str(args.get("new", ""))
+            if prior is None or old not in prior:
+                return []          # the edit will fail anyway; nothing real to judge
+            content = prior.replace(old, new)
+
+        try:
+            return inspect_write(path, content, prior=prior)
+        except Exception:  # noqa: BLE001 - advisory only, never load-bearing
+            return []
 
     # -- the wrapper ------------------------------------------------------
     def guard(self, tool: str, args: dict[str, Any], execute: Callable[[], str]) -> Outcome:
         """Authorise, snapshot, run, confirm. The single path every call takes."""
+        findings = self._findings = self._inspect(tool, args)
+        risk = risk_of(findings)
+        if findings:
+            # Written into the same hash chain as the verdict, so a replay shows
+            # what was noticed at the time and not merely what was decided. A
+            # finding that only ever reached the terminal is not evidence.
+            from .session import record
+
+            record(self, "inspection", {
+                "session_id": self.session_id,
+                "tool": tool,
+                "path": str(args.get("path", "")),
+                "risk": risk,
+                "worst": worst(findings),
+                "findings": [{"rule": f.rule, "severity": f.severity,
+                              "message": f.message, "line": f.line,
+                              "excerpt": f.excerpt} for f in findings],
+            })
+
         verdict = self.plane.authorize(
             actor_private_key=self.private_key,
             actor_id=self.actor_id,
@@ -279,6 +377,10 @@ class SafetyPlane:
             tool=tool,
             args=args,
             action="read" if tool in {"read", "glob", "grep"} else "write",
+            risk=risk,
+            # The description stays clean. Findings are their own ledger entry
+            # and a replay joins them back, so repeating them here would only
+            # duplicate them in every rendering.
             description=_describe(tool, args),
             session_id=self.session_id,
         )
