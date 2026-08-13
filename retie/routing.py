@@ -27,6 +27,31 @@ So this module does three things:
 2. **Starts cheap and escalates on evidence.** The first attempt at a turn uses
    a light model. Escalation happens when that model actually fails, not
    because a task was guessed to be hard in advance.
+
+   This was tested rather than assumed, because the obvious objection is that a
+   cheap model might need so many more turns that it costs more overall. Same
+   task (fix a one-line bug, verify it with a shell command), four models:
+
+     model                tier  fixed  tools  units   time
+     gpt-oss:20b            1     y      5     4.97    14s
+     nemotron-3-nano:30b    1     y      6    11.13    18s
+     gpt-oss:120b           2     y      8    16.77    16s
+     nemotron-3-super       3     y      3    15.78   395s
+
+   The objection is directionally right and quantitatively wrong. The tier-3
+   model *is* more efficient per call — three tool calls against five — but not
+   three times more efficient, so the weight dominates and cheapest-first still
+   wins on quota by 3x.
+
+   Two things the measurement showed that the reasoning did not. Latency does
+   not track weight at all: the tier-3 model took 395 seconds against 14, which
+   for an interactive tool decides the question on its own. And the spread
+   *within* a tier was larger than the spread between tiers one and two —
+   gpt-oss:20b cost less than half what nemotron-3-nano:30b did at the same
+   tier. Tier is a budget guardrail, not a quality ranking.
+
+   Four single runs on one task. Enough to settle the direction, not enough to
+   rank models.
 3. **Tells session limits and weekly limits apart**, because one is worth
    waiting out and the other is not. Spinning through models against a weekly
    cap wastes the user's time and hides the real answer, which is that the

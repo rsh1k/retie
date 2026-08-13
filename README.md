@@ -65,7 +65,7 @@ The obvious design is "when one model is rate-limited, switch to another." **It 
 
 What *does* buy working hours is the other half of the same page: **usage is weighted by how heavy the model is**, from level 1 for light models like `gpt-oss:20b` up to level 4 for `deepseek-v4-pro`. A tier-1 model costs roughly a quarter of a tier-4 one for the same call. So retie:
 
-- **starts on the cheapest model and escalates only on failure** — never on a guess that a task looks hard
+- **starts on the cheapest model and escalates only on failure** — never on a guess that a task looks hard. Tested, not assumed: on the same task, tier 1 cost 4.97 quota units in 14s while tier 3 cost 15.78 in 395s. The heavy model *is* more efficient per call (3 tool calls vs 5) — just not 3x more, so the weight dominates. Latency does not track weight at all, and the spread *within* tier 1 was wider than between tiers 1 and 2, so tier is a budget guardrail rather than a quality ranking
 - **derives tiers from live model size** rather than a hard-coded table, anchored on the two models Ollama documents as level 1 and level 4, so a newly published model is tiered the day it appears
 - **tells session limits and weekly caps apart.** A session limit escalates to the next model. A weekly cap stops immediately and says so, because trying the rest would be a lie that costs you four more failed requests before you learn the truth
 - **remembers refusals across runs**, so a fresh session does not re-hit a model that just refused
