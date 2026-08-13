@@ -126,14 +126,45 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
 
+      # The next version is derived from whichever is higher: the version in
+      # pyproject.toml, or the newest one already on PyPI. That is not belt and
+      # braces — it is the fix for a real failure.
+      #
+      # A human push landing while a release was in flight rejected the bump
+      # commit after PyPI had already been published. main stayed a version
+      # behind, the next run recomputed the same number, saw it on PyPI, and
+      # skipped publishing while reporting success. A silent no-publish that
+      # reports green is the worst outcome available.
+      #
+      # PyPI is the authority on what has shipped, so the bump starts there and
+      # the desync heals itself on the next run.
       - name: Bump version
         id: bump
         env:
           LEVEL: ${{ needs.gate.outputs.level }}
         run: |
           set -euo pipefail
+          NAME=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['name'])")
+          LOCAL=$(python3 scripts/bump_version.py --show)
+          PUBLISHED=$(curl -sf "https://pypi.org/pypi/$NAME/json" \
+            | python3 -c "import json,sys;print(json.load(sys.stdin)['info']['version'])" 2>/dev/null || echo "0.0.0")
+          HIGHER=$(python3 - "$LOCAL" "$PUBLISHED" <<'PY'
+          import sys
+          def key(v): return tuple(int(x) for x in v.split("."))
+          print(max(sys.argv[1], sys.argv[2], key=key))
+          PY
+          )
+          if [ "$HIGHER" != "$LOCAL" ]; then
+            echo "::warning::pyproject says $LOCAL but PyPI has $PUBLISHED; bumping from $HIGHER"
+            python3 - "$HIGHER" <<'PY'
+          import pathlib, re, sys
+          p = pathlib.Path("pyproject.toml")
+          p.write_text(re.sub(r'(?m)^version = "[^"]+"', f'version = "{sys.argv[1]}"', p.read_text(), count=1))
+          PY
+          fi
           NEW=$(python3 scripts/bump_version.py "$LEVEL")
           echo "version=$NEW" >> "$GITHUB_OUTPUT"
+          echo "local=$LOCAL published=$PUBLISHED -> releasing $NEW"
 
       - name: Check PyPI does not already have this version
         id: exists
@@ -144,11 +175,16 @@ jobs:
           NAME=$(python3 -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['name'])")
           CODE=$(curl -s -o /dev/null -w '%{http_code}' "https://pypi.org/pypi/$NAME/$VERSION/json")
           if [ "$CODE" = "200" ]; then
-            echo "already=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::$NAME $VERSION is already on PyPI; skipping publish"
-          else
-            echo "already=false" >> "$GITHUB_OUTPUT"
+            # With the bump now derived from PyPI, computing an already-published
+            # version means something is genuinely wrong rather than that this is
+            # a harmless re-run. Failing is right: the previous behaviour turned
+            # this exact situation into a green run that shipped nothing.
+            echo "::error::$NAME $VERSION is already on PyPI. The version was" \
+                 "derived from the published one, so this indicates a desync" \
+                 "rather than a re-run."
+            exit 1
           fi
+          echo "already=false" >> "$GITHUB_OUTPUT"
 
       - name: Build
         if: steps.exists.outputs.already == 'false'
@@ -180,6 +216,15 @@ jobs:
           git add pyproject.toml
           git commit -m "Release v$VERSION [skip release]"
           git tag -a "v$VERSION" -m "v$VERSION"
+          # Rebase before pushing. A push that lands while a release is in flight
+          # otherwise rejects the bump commit, which is how the tag and PyPI got
+          # ahead of main in the first place. PyPI is already published by this
+          # point, so losing the bump here is a silent inconsistency rather than
+          # a visible failure.
+          for attempt in 1 2 3; do
+            git pull --rebase --autostash origin main && break
+            sleep 3
+          done
           git push origin HEAD:main --follow-tags
 
       - name: GitHub release

@@ -240,7 +240,8 @@ class SafetyPlane:
             human_id=human.id,
             agent_id=agent.id,
             scope=Scope(
-                allowed_tools=frozenset({"read", "write", "edit", "glob", "grep", "bash"}),
+                allowed_tools=frozenset({"read", "write", "edit", "glob", "grep",
+                                         "bash", "fetch", "recall"}),
                 allowed_actions=frozenset({"read", "write"}),
                 max_risk=40,
                 # Deliberately permissive at the delegation layer. A floor of

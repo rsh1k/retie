@@ -27,7 +27,7 @@ retie gates on **consequence** instead. The question is never "is this tool allo
 
 | Action | Reversibility | What happens |
 |---|---|---|
-| `read`, `glob`, `grep` | reversible (no effect) | runs, no prompt |
+| `read`, `glob`, `grep`, `fetch` | reversible (no effect) | runs, no prompt |
 | `write`, `edit` | reversible — prior contents captured first | runs, no prompt, undoable |
 | `bash` (sandboxed) | **reversible** — workspace snapshotted, no network | runs, no prompt, undoable |
 | `bash` (no sandbox) | **irreversible** | stops and asks a person |
@@ -79,6 +79,24 @@ retie run ./proj --max-tier 2
 `retie usage` reports **consumption, not remaining balance**. Ollama publishes neither the free tier's allowance nor a usage endpoint, so a percentage would mean inventing the denominator.
 
 The default model is **`kimi-k2.7-code`** when you name one; otherwise the ladder starts at tier 1. Kimi is chosen for tool-calling *stability* rather than coding score — the strongest published agentic-loop evidence, 4,000+ tool calls sustained in one session. `glm-5.2` scores marginally higher on coding (87 vs 86) with 1M context. Those figures are vendor-run; treat them as directional.
+
+## The web tool, and why it belongs here
+
+An agent that can read the web and write to a filesystem is the exact shape [Promptfoo demonstrated breaking](https://www.promptfoo.dev/blog/openclaw-at-work/): malicious page, agent reads it, agent does what the page said. Adding it to a tool built around *assume the hijack succeeds, constrain what it can reach* is the point, not a risk to apologise for.
+
+```bash
+› read https://peps.python.org/pep-0621/ and check our pyproject against it
+```
+
+Three things a naive fetch tool does not do:
+
+**The fence is random per fetch.** Untrusted text is wrapped in a marker the content cannot predict. A fixed marker is breakable — content containing it closes the block and addresses the model from outside. That is not hypothetical: I found a production RAG pipeline fencing retrieved documents in a constant `"""` that page content could forge.
+
+**SSRF is checked before the request leaves.** DNS is resolved first and the *resolved address* is checked, because a public hostname can point anywhere. Redirects are followed by hand so every hop is re-checked — a public URL that redirects to `127.0.0.1` is the standard way past a guard that only inspects the first request. Refused: loopback, private ranges, link-local (`169.254.169.254` cloud metadata), IPv6 loopback, and any scheme that is not http/https.
+
+**The response is scanned and the finding recorded**, whether or not anything is blocked. Detection is not the control — the gate is — but an injection attempt that reached the model is precisely what an audit needs later. The payload is still delivered rather than stripped: hiding it leaves the model reasoning from a gap.
+
+Note the asymmetry: a sandboxed shell has *no* network, this tool does. Fetching is read-only and reversible so it needs no approval — and it is the one path by which untrusted text enters a session.
 
 ## Token cost, measured
 

@@ -197,6 +197,11 @@ INVERSE_SPECS = [
                 notes="read-only; nothing to undo"),
     InverseSpec(tool="grep", kind=Reversibility.REVERSIBLE, inverse_tool="noop",
                 notes="read-only; nothing to undo"),
+    # Fetching changes nothing locally, so there is nothing to undo. Its risk is
+    # of a different kind — it is the way untrusted text enters a session — and
+    # that is handled by fencing and scanning the response, not by the gate.
+    InverseSpec(tool="fetch", kind=Reversibility.REVERSIBLE, inverse_tool="noop",
+                notes="read-only; the response is fenced and scanned instead"),
     InverseSpec(tool="write", kind=Reversibility.REVERSIBLE,
                 inverse_tool="restore_snapshot",
                 # snapshot_fields says what to capture before acting; arg_map
