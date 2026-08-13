@@ -16,10 +16,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from .context import ContextStore
 from .providers import ToolCall, Turn
 from .safety import SafetyPlane
 from .tools import Workspace
-from .toolspec import ToolSpec, build_specs
+from .toolspec import ToolSpec, build_specs, recall_spec
 
 MAX_STEPS = 40
 
@@ -45,7 +46,9 @@ class Agent:
         self.ws = ws
         self.plane = plane
         self.backend = backend
+        self.context = ContextStore()
         self.specs = build_specs(ws, plane.sandbox if plane.sandboxed else None)
+        self.specs.append(recall_spec(self.context))
         self.by_name: dict[str, ToolSpec] = {s.name: s for s in self.specs}
         self.messages: list[dict[str, Any]] = []
 
@@ -59,8 +62,14 @@ class Agent:
         if "__parse_error__" in call.args:
             return ("[error] your tool arguments were not valid JSON. Send them "
                     "again as a single well-formed JSON object.")
-        return self.plane.guard(call.name, call.args,
-                                lambda: spec.run(**call.args)).text
+        out = self.plane.guard(call.name, call.args,
+                               lambda: spec.run(**call.args))
+        if not out.allowed or call.name == "recall":
+            # A refusal is short and must reach the model verbatim; a recall is
+            # the model explicitly asking for the full text, so stubbing it
+            # would be a loop.
+            return out.text
+        return self.context.stash(call.name, out.text)
 
     def send(self, text: str, on_text: Callable[[str], None]) -> None:
         """Run one user turn to completion, streaming assistant text out."""

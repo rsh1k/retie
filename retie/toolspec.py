@@ -119,3 +119,21 @@ def build_specs(ws: Workspace, sandbox: Any = None) -> list[ToolSpec]:
             lambda command: run_bash(ws, command, sandbox=sandbox),
         ),
     ]
+
+
+def recall_spec(store: Any) -> ToolSpec:
+    """The tool that fetches a result the transcript elided.
+
+    Registered as an ordinary tool so it passes the same gate as everything
+    else. It reads nothing from disk and changes nothing, so it classifies as
+    reversible and never prompts — but it is not a special case in the loop.
+    """
+    return ToolSpec(
+        "recall",
+        "Retrieve the full text of an earlier tool result that was truncated. "
+        "Use this only when the preview genuinely is not enough — the preview "
+        "usually answers the question.",
+        _obj({"ref": _str('The reference from the truncation notice, e.g. "r1".')},
+             ["ref"]),
+        lambda ref: store.recall(ref),
+    )

@@ -80,6 +80,23 @@ retie run ./proj --max-tier 2
 
 The default model is **`kimi-k2.7-code`** when you name one; otherwise the ladder starts at tier 1. Kimi is chosen for tool-calling *stability* rather than coding score — the strongest published agentic-loop evidence, 4,000+ tool calls sustained in one session. `glm-5.2` scores marginally higher on coding (87 vs 86) with 1M context. Those figures are vendor-run; treat them as directional.
 
+## Token cost, measured
+
+A coding agent reads files, and files are long. Put every read into the transcript and it is re-sent — and re-billed — on every later turn of the session. On a metered plan that is the largest avoidable cost and what ends a long session early.
+
+retie keeps large tool results out of the conversation and leaves a preview plus a reference; the model calls `recall(ref=...)` if it needs the rest. Nothing is discarded, so a model that needs the detail can still have it — compaction that loses information silently is how an agent starts answering confidently from a gap.
+
+Measured on a task that reads two ~25 KB source files and summarises them:
+
+| | Prompt tokens | Quota units | Tool calls | Time |
+|---|---|---|---|---|
+| compaction off | 18,862 | 19.25 | 6 | 15s |
+| **on** | **6,646** | **7.09** | **5** | **12s** |
+
+**65% fewer prompt tokens, no extra calls, faster.** The first attempt used a 420-character preview and was much worse — 11 calls instead of 6, because the preview was too small to answer with, so the model recalled nearly everything and paid the stub on top of the payload. The preview size is the whole game, and it was tuned by measurement rather than taste.
+
+Single runs on one task, so treat the exact figures as indicative; the direction and rough size held across every configuration tried.
+
 ## The ordering is the design
 
 Every tool call takes one path:

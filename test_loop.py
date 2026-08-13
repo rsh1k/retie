@@ -150,6 +150,32 @@ def main() -> int:
     check("runaway loop stopped at the step cap", "stopped after" in text,
           f"{len(gated)} tool calls before stopping")
 
+    # ---- large results are kept out of the transcript, reversibly ----------
+    print(f"\n{BOLD}large tool results are elided but never lost{RESET}\n")
+    from retie.context import INLINE_LIMIT, ContextStore
+
+    store = ContextStore()
+    small = "x" * (INLINE_LIMIT - 1)
+    big = "line\n" * 4000
+
+    check("a small result is left alone", store.stash("read", small) == small,
+          f"{len(small)} chars, under the {INLINE_LIMIT} limit")
+
+    stub = store.stash("read", big)
+    check("a large result is replaced by a stub", len(stub) < len(big) / 5,
+          f"{len(big):,} chars became {len(stub):,}")
+    check("the stub says how to get the rest", "recall(ref=" in stub)
+    check("nothing is lost", store.recall("r1") == big,
+          "recall returns the payload byte for byte")
+    check("a bad reference is reported, not raised",
+          "no such reference" in store.recall("r99"))
+
+    # The whole point is fewer tokens on later turns, so the saving has to be
+    # real rather than a reshuffle.
+    check("the saving is counted honestly",
+          store.saved_chars == len(big) - 1500,
+          store.summary())
+
     print(f"\n{'all checks passed' if not failures else str(failures) + ' FAILED'}\n")
     return 1 if failures else 0
 
